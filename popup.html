@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Moodle Forum Grader</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Sora:wght@300;400;600;700&display=swap');
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            width: 340px;
+            background: #0d0f14;
+            color: #e8e4dc;
+            font-family: 'Sora', sans-serif;
+            font-size: 13px;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1a1f2e 0%, #0d0f14 100%);
+            border-bottom: 1px solid #2a2f3e;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #4f8ef7, #a855f7);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .header-text h1 {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: #fff;
+        }
+
+        .header-text p {
+            font-size: 10px;
+            color: #6b7280;
+            margin-top: 2px;
+            font-family: 'Space Mono', monospace;
+        }
+
+        .section {
+            padding: 16px 20px;
+            border-bottom: 1px solid #1e2330;
+        }
+
+        label {
+            display: block;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+
+        select {
+            width: 100%;
+            background: #1a1f2e;
+            border: 1px solid #2a3045;
+            border-radius: 8px;
+            padding: 9px 12px;
+            color: #e8e4dc;
+            font-family: 'Sora', sans-serif;
+            font-size: 12px;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        select:focus { border-color: #4f8ef7; }
+
+        .provider-hint {
+            margin-top: 7px;
+            font-size: 10px;
+            color: #6b7280;
+            font-family: 'Space Mono', monospace;
+            line-height: 1.5;
+        }
+
+        .provider-hint a { color: #4f8ef7; text-decoration: none; }
+
+        input[type="password"],
+        input[type="text"] {
+            width: 100%;
+            background: #1a1f2e;
+            border: 1px solid #2a3045;
+            border-radius: 8px;
+            padding: 9px 12px;
+            color: #e8e4dc;
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            border-color: #4f8ef7;
+        }
+
+        .rubric-grid {
+            display: grid;
+            grid-template-columns: 1fr 60px;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .rubric-label {
+            font-size: 12px;
+            color: #c9c5be;
+        }
+
+        .rubric-input {
+            background: #1a1f2e;
+            border: 1px solid #2a3045;
+            border-radius: 6px;
+            padding: 5px 8px;
+            color: #4f8ef7;
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            font-weight: 700;
+            text-align: center;
+            width: 100%;
+            outline: none;
+        }
+
+        .rubric-input:focus {
+            border-color: #4f8ef7;
+        }
+
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #2a3045;
+        }
+
+        .total-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #9ca3af;
+        }
+
+        .total-val {
+            font-family: 'Space Mono', monospace;
+            font-size: 14px;
+            font-weight: 700;
+            color: #4f8ef7;
+        }
+
+        .ai-deduct {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #1a1f2e;
+            border-radius: 8px;
+            padding: 10px 12px;
+            border: 1px solid #2a3045;
+        }
+
+        .ai-deduct-text {
+            flex: 1;
+        }
+
+        .ai-deduct-text strong {
+            display: block;
+            font-size: 12px;
+            color: #e8e4dc;
+        }
+
+        .ai-deduct-text span {
+            font-size: 10px;
+            color: #6b7280;
+        }
+
+        .ai-deduct input[type="number"] {
+            width: 52px;
+            background: #0d0f14;
+            border: 1px solid #3b3f52;
+            border-radius: 6px;
+            padding: 5px 6px;
+            color: #f87171;
+            font-family: 'Space Mono', monospace;
+            font-size: 12px;
+            font-weight: 700;
+            text-align: center;
+            outline: none;
+        }
+
+        .btn-grade {
+            display: block;
+            width: calc(100% - 40px);
+            margin: 16px 20px 0;
+            background: linear-gradient(135deg, #4f8ef7, #a855f7);
+            border: none;
+            border-radius: 10px;
+            padding: 12px;
+            color: #fff;
+            font-family: 'Sora', sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        .btn-grade:hover {
+            opacity: 0.9;
+        }
+
+        .btn-grade:active {
+            transform: scale(0.98);
+        }
+
+        .btn-grade:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin: 10px 20px 16px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-family: 'Space Mono', monospace;
+            display: none;
+        }
+
+        .status.info {
+            background: #1a2535;
+            border: 1px solid #2a4a7f;
+            color: #7eb3f7;
+            display: block;
+        }
+
+        .status.error {
+            background: #2a1a1a;
+            border: 1px solid #7f2a2a;
+            color: #f78787;
+            display: block;
+        }
+
+        .status.success {
+            background: #1a2a1e;
+            border: 1px solid #2a7f4a;
+            color: #7ef7a0;
+            display: block;
+        }
+
+        .progress-bar {
+            height: 3px;
+            background: #1e2330;
+            margin: 0 20px 16px;
+            border-radius: 2px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-bar.active {
+            display: block;
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #4f8ef7, #a855f7);
+            border-radius: 2px;
+            transition: width 0.4s ease;
+        }
+
+        .footer {
+            padding: 10px 20px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-sm {
+            flex: 1;
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid #2a3045;
+            background: #1a1f2e;
+            color: #9ca3af;
+            font-size: 11px;
+            font-family: 'Sora', sans-serif;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-sm:hover {
+            border-color: #4f8ef7;
+            color: #4f8ef7;
+        }
+
+        .not-moodle {
+            padding: 24px 20px;
+            text-align: center;
+        }
+
+        .not-moodle .icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+
+        .not-moodle p {
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .not-moodle strong {
+            color: #e8e4dc;
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        <div class="logo">🎓</div>
+        <div class="header-text">
+            <h1>Forum Grader</h1>
+            <p>MOODLE · AI-POWERED ASSESSMENT</p>
+        </div>
+    </div>
+
+    <div id="main-content">
+
+        <div class="section">
+            <label>AI Provider</label>
+            <select id="provider">
+                <option value="gemini">Google Gemini (free)</option>
+                <option value="groq">Groq — Llama 3 (free)</option>
+                <option value="ollama">Ollama (local · no key)</option>
+                <option value="anthropic">Anthropic Claude (paid)</option>
+            </select>
+            <div id="providerHint" class="provider-hint"></div>
+        </div>
+
+        <div class="section" id="apiKeySection">
+            <label id="apiKeyLabel">API Key</label>
+            <input type="password" id="apiKey" placeholder="" />
+        </div>
+
+        <div class="section" id="ollamaSection" style="display:none">
+            <label>Ollama Model</label>
+            <input type="text" id="ollamaModel" placeholder="llama3.2" value="llama3.2" />
+            <div class="provider-hint">Ollama must be running locally. Install from ollama.com</div>
+        </div>
+
+        <div class="section">
+            <label>Grading Rubric (Total: <span id="totalPts">100</span> pts)</label>
+            <div class="rubric-grid">
+                <span class="rubric-label">Answer Quality & Depth</span>
+                <input type="number" class="rubric-input" id="w_quality" value="35" min="0" max="100" />
+
+                <span class="rubric-label">APA References &amp; Figures</span>
+                <input type="number" class="rubric-input" id="w_figures" value="20" min="0" max="100" />
+
+                <span class="rubric-label">Peer Replies (quantity + quality)</span>
+                <input type="number" class="rubric-input" id="w_replies" value="25" min="0" max="100" />
+
+                <span class="rubric-label">Writing Clarity & Structure</span>
+                <input type="number" class="rubric-input" id="w_writing" value="20" min="0" max="100" />
+            </div>
+            <div class="total-row">
+                <span class="total-label">TOTAL WEIGHT</span>
+                <span class="total-val" id="totalDisplay">100 pts</span>
+            </div>
+        </div>
+
+        <div class="section">
+            <label>AI Content Detection</label>
+            <div class="ai-deduct">
+                <div class="ai-deduct-text">
+                    <strong>Auto-deduct if AI detected</strong>
+                    <span>Points subtracted from final score</span>
+                </div>
+                <input type="number" id="aiDeduct" value="20" min="0" max="100" />
+            </div>
+        </div>
+
+        <button class="btn-grade" id="gradeBtn">⚡ Grade This Discussion</button>
+
+        <div class="status" id="statusMsg"></div>
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+
+        <div class="footer">
+            <button class="btn-sm" id="showOverlay">📊 Show Dashboard</button>
+            <button class="btn-sm" id="exportCSV">📥 Export CSV</button>
+        </div>
+
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,19 @@
+https://iauonline.net/mod/forum/discuss.php?d=38834&mode=1 
+
+here is discussion question and i need to pull all the answers from each participants, on how many other students they reply and i need to grade them , the quality of answers with describtion ,figures, plagarism or copied content, ai content and all , is there way i could make extension or some form and use on grading
+
+
+
+The best approach is a Chrome Extension that:
+
+Scrapes all student posts and replies from the Moodle forum page (when you're logged in)
+Sends each post to Claude AI for automated grading
+Gives you a grading dashboard with scores, feedback, and flags for AI/plagiarism
+
+It would grade on:
+
+Answer quality (depth, relevance, accuracy)
+Use of figures/descriptions
+Replies to peers (how many, quality)
+AI-generated content detection
+Plagiarism / copied content detection
