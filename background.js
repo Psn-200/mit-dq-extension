@@ -1,12 +1,10 @@
-// background.js — handles AI grading via Anthropic API and CSV export
+// background.js — AI grading, LLM router, CSV export
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-
     if (msg.action === 'GRADE_POSTS') {
-        gradePosts(msg).then(result => sendResponse(result)).catch(err => sendResponse({ error: err.message }));
+        gradePosts(msg).then(r => sendResponse(r)).catch(e => sendResponse({ error: e.message }));
         return true;
     }
-
     if (msg.action === 'EXPORT_CSV') {
         exportCSV(msg.grades);
         return true;
@@ -23,41 +21,20 @@ function letterGrade(score) {
     return 'F';
 }
 
-// ─── AI GRADING ─────────────────────────────────────────────────────────────
-
-async function gradePosts({ posts, weights, aiDeduct, apiKey, provider, ollamaModel }) {
-    const studentPosts = posts.filter(p => p.idx > 0 || posts.length === 1);
-
-    const byAuthor = {};
-    studentPosts.forEach(p => {
-        if (!byAuthor[p.author]) byAuthor[p.author] = { answer: null, replies: [] };
-        if (p.isAnswer) byAuthor[p.author].answer = p;
-        else if (p.isPeerReply) byAuthor[p.author].replies.push(p);
-        else if (!byAuthor[p.author].answer) byAuthor[p.author].answer = p;
-    });
-
-    const grades = [];
-    for (const author of Object.keys(byAuthor)) {
-        const data = byAuthor[author];
-        if (!data.answer) continue;
-        grades.push(await gradeOneStudent(author, data, weights, aiDeduct, apiKey, provider, ollamaModel));
-    }
-
-    return { grades };
-}
-
 // ─── LLM ROUTER ─────────────────────────────────────────────────────────────
 
-async function callLLM(prompt, provider, apiKey, ollamaModel) {
+async function callLLM(prompt, provider, apiKey, modelName, customUrl) {
+
     if (provider === 'gemini') {
+        const model = modelName || 'gemini-1.5-flash';
         const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { maxOutputTokens: 1000, temperature: 0.2 }
+                    generationConfig: { maxOutputTokens: 1200, temperature: 0.2 }
                 })
             }
         );
@@ -69,14 +46,11 @@ async function callLLM(prompt, provider, apiKey, ollamaModel) {
     if (provider === 'groq') {
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
             body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile',
+                model: modelName || 'llama-3.3-70b-versatile',
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 1000,
+                max_tokens: 1200,
                 temperature: 0.2
             })
         });
@@ -90,9 +64,26 @@ async function callLLM(prompt, provider, apiKey, ollamaModel) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: ollamaModel || 'llama3.2',
+                model: modelName || 'llama3.2',
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 1000,
+                max_tokens: 1200,
+                temperature: 0.2
+            })
+        });
+        const json = await res.json();
+        if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+        return json.choices[0].message.content.replace(/```json|```/g, '').trim();
+    }
+
+    if (provider === 'custom') {
+        const base = (customUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
+        const res = await fetch(`${base}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model: modelName || 'gpt-4o-mini',
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 1200,
                 temperature: 0.2
             })
         });
@@ -111,8 +102,8 @@ async function callLLM(prompt, provider, apiKey, ollamaModel) {
             'anthropic-dangerous-direct-browser-access': 'true'
         },
         body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 1000,
+            model: modelName || 'claude-sonnet-4-6',
+            max_tokens: 1200,
             messages: [{ role: 'user', content: prompt }]
         })
     });
@@ -121,74 +112,116 @@ async function callLLM(prompt, provider, apiKey, ollamaModel) {
     return json.content[0].text.replace(/```json|```/g, '').trim();
 }
 
-async function gradeOneStudent(author, data, weights, aiDeduct, apiKey, provider, ollamaModel) {
+// ─── GRADING ORCHESTRATOR ────────────────────────────────────────────────────
+
+async function gradePosts({ posts, weights, aiDeduct, minReplies, apiKey, provider, modelName, customUrl }) {
+    const studentPosts = posts.filter(p => p.idx > 0 || posts.length === 1);
+
+    const byAuthor = {};
+    studentPosts.forEach(p => {
+        if (!byAuthor[p.author]) byAuthor[p.author] = { answer: null, replies: [] };
+        if (p.isAnswer)                        byAuthor[p.author].answer = p;
+        else if (p.isPeerReply)                byAuthor[p.author].replies.push(p);
+        else if (!byAuthor[p.author].answer)   byAuthor[p.author].answer = p;
+    });
+
+    const grades = [];
+    for (const author of Object.keys(byAuthor)) {
+        const data = byAuthor[author];
+        if (!data.answer) continue;
+        grades.push(await gradeOneStudent(
+            author, data, weights, aiDeduct, minReplies || 2,
+            apiKey, provider, modelName, customUrl
+        ));
+    }
+
+    return { grades };
+}
+
+// ─── SINGLE STUDENT GRADER ───────────────────────────────────────────────────
+
+async function gradeOneStudent(author, data, weights, aiDeduct, minReplies, apiKey, provider, modelName, customUrl) {
     const { answer, replies } = data;
 
     const peerRepliesMade = replies.length;
-    const repliedToList = replies.map(r => r.repliedTo).flat().filter(Boolean);
+    const repliedToList   = replies.map(r => r.repliedTo).flat().filter(Boolean);
 
     // Figure detection
     const hasFigures = (answer.images || 0) > 0 ||
         /\b(figure|table|chart|graph|diagram|exhibit|appendix)\b/i.test(answer.body);
 
     // APA in-text citation detection: (Author, Year) or (Author et al., Year)
-    const apaInTextPattern = /\([A-Z][a-zA-Zé\-]+(?:\s+et\s+al\.)?(?:\s*&\s*[A-Z][a-zA-Z]+)?,\s+\d{4}[a-z]?\)/g;
-    const apaMatches = answer.body.match(apaInTextPattern) || [];
+    const apaPattern   = /\([A-Z][a-zA-Zé\-]+(?:\s+et\s+al\.)?(?:\s*&\s*[A-Z][a-zA-Z]+)?,\s+\d{4}[a-z]?\)/g;
+    const apaMatches   = answer.body.match(apaPattern) || [];
     const referenceCount = apaMatches.length;
-    const hasReferences = referenceCount > 0 ||
+    const hasReferences  = referenceCount > 0 ||
         /\b(references|bibliography|works cited)\b/i.test(answer.body) ||
         /doi:|et\s+al\./i.test(answer.body);
 
-    const prompt = `You are grading a student's Moodle forum discussion post for an academic course. Analyze carefully and return ONLY valid JSON with no markdown.
+    // Format peer replies for the prompt
+    const replyLines = replies.map((r, i) =>
+        `  Reply ${i + 1} → to "${r.repliedTo?.[0] || 'unknown'}": "${r.body.substring(0, 350)}"`
+    ).join('\n') || '  None';
+
+    const prompt = `You are an academic instructor grading a Moodle forum discussion post. Analyze carefully and return ONLY valid JSON — no markdown, no explanation outside the JSON.
 
 STUDENT: ${author}
+MINIMUM PEER REPLIES REQUIRED BY COURSE: ${minReplies}
 
-MAIN ANSWER:
-"""
+━━ MAIN ANSWER ━━
 ${answer.body}
-"""
 
-PEER REPLIES MADE (${peerRepliesMade}):
-${replies.map((r, i) => `Reply ${i + 1}: "${r.body.substring(0, 400)}"`).join('\n') || 'None'}
+━━ PEER REPLIES MADE (${peerRepliesMade} total) ━━
+${replyLines}
 
-AUTO-DETECTED IN POST:
-- Embedded images/figures: ${hasFigures}
-- APA-style in-text citations found: ${referenceCount} (examples: ${apaMatches.slice(0, 3).join(', ') || 'none detected'})
-- Has reference list / bibliography section: ${hasReferences}
+━━ AUTO-DETECTED ━━
+- Images/figures embedded: ${hasFigures}
+- APA in-text citations found: ${referenceCount} (${apaMatches.slice(0, 3).join(', ') || 'none'})
+- Reference list / bibliography present: ${hasReferences}
 
-Grade on these criteria and return ONLY a JSON object:
+━━ GRADING TASK ━━
+Return ONLY this JSON object:
 {
-  "quality": <0-${weights.w_quality}, score for: answer depth, accuracy, relevance to question, use of specific real-world examples or data>,
-  "figures": <0-${weights.w_figures}, score for BOTH: (a) APA citations — proper in-text (Author, Year) and a reference list? (b) figures, tables, charts, or concrete visual/data examples. Full score needs both; partial for only one>,
-  "replies": <0-${weights.w_replies}, score for peer replies count AND quality — substantive engagement vs. "Great post!" generic praise. Zero if no replies>,
-  "writing": <0-${weights.w_writing}, score for: clarity, logical structure, grammar, academic tone, paragraph organization>,
-  "aiDetected": <true/false>,
+  "quality":  <0–${weights.w_quality}, depth + accuracy + relevance + real examples>,
+  "figures":  <0–${weights.w_figures}, (a) APA citations quality AND (b) figures/tables/charts — full score needs both, partial for one>,
+  "replies":  <0–${weights.w_replies}, peer reply score: 0 if none, partial if below ${minReplies} required, partial if all generic, full if ${minReplies}+ substantive replies>,
+  "writing":  <0–${weights.w_writing}, clarity + structure + grammar + academic tone>,
+
+  "aiDetected":   <true/false>,
   "aiConfidence": <"low"|"medium"|"high">,
-  "aiReason": <1 sentence: specific phrases or structural patterns that suggest AI, else "">,
-  "apaScore": <"none"|"poor"|"fair"|"good" — "none"=no citations, "poor"=sources mentioned without format, "fair"=some correct APA but missing reference list or inconsistent, "good"=proper in-text (Author, Year) AND formatted reference list>,
-  "apaDetails": <1-2 sentences: what APA elements are present or missing, cite specific examples from the post. Mention if DOI or URL is missing from references>,
-  "figureDetails": <1 sentence: are figures/tables present? labeled? referenced in text? or completely absent?>,
-  "replyQuality": <"none"|"generic"|"substantive" — "none"=no replies, "generic"=short praise only, "substantive"=adds ideas, asks questions, challenges or builds on peer's point>,
-  "feedback": <4-5 sentences covering: (1) content quality, (2) APA reference quality with specific advice, (3) figure/example usage, (4) peer reply engagement, (5) one concrete improvement suggestion>,
-  "copiedContent": <true/false — verbatim or near-verbatim text from external sources without citation>,
-  "plagiarismNote": <1 sentence with a quoted excerpt if copied content suspected, else "">
+  "aiReason":     <1 sentence: specific phrases/patterns that signal AI writing, or "">,
+
+  "apaScore":   <"none"|"poor"|"fair"|"good">,
+  "apaDetails": <2 sentences: what citations are present, what is wrong or missing, quote a specific example>,
+
+  "figureDetails": <1–2 sentences: figures present? labeled? relevant? referenced in text? or absent?>,
+
+  "peerRepliesMet":      <true if student made >= ${minReplies} replies, else false>,
+  "peerReplyBreakdown":  [
+    { "repliedTo": "<name>", "quality": "<generic|substantive>", "summary": "<1 sentence summary of what they said>" }
+  ],
+  "peerComment": <2–3 sentences: did they meet the ${minReplies}-reply requirement? quality of each reply — were they substantive or generic? specific quotes welcome>,
+
+  "contentComment": <3–4 sentences: detailed analysis of answer — what was strong, what was shallow, missing concepts, quality of examples used>,
+  "apaComment":     <2–3 sentences: detailed APA analysis — correct format? missing reference list? specific errors found?>,
+  "figureComment":  <1–2 sentences: figure/table usage — present and relevant or missing?>,
+
+  "feedback":       <4–5 sentence overall constructive feedback covering all criteria with one specific actionable improvement>,
+
+  "copiedContent":  <true/false>,
+  "plagiarismNote": <1 sentence with quoted excerpt if plagiarism suspected, else "">
 }
 
-APA rules to check:
-- In-text: (Author, Year) or (Author & Author, Year) or (Author et al., Year)
-- Reference list: Author, A. A. (Year). Title. Journal, volume(issue), pages. https://doi.org/xxxxx
-- Common errors: missing year, square brackets instead of parentheses, no reference list, URL without doi prefix
-
-AI signals: perfect bullet structure, phrases like "In conclusion" / "It is important to note" / "In today's world" / "Firstly... Secondly...", no personal voice, zero grammar variation, missing any personal perspective or specific experience.`;
+APA rules: in-text = (Author, Year) or (Author et al., Year). Reference list = Author, A. (Year). Title. Journal, vol(iss), pp. https://doi.org/xxx. Flag: wrong brackets, missing year, no reference list, URLs without DOI prefix.
+AI signals: "In conclusion" / "It is important to note" / "Firstly… Secondly… Finally" / perfect bullet structure / no personal voice / zero grammar variation / no specific personal experience.`;
 
     try {
-        const text = await callLLM(prompt, provider, apiKey, ollamaModel);
-        const parsed = JSON.parse(text);
+        const rawText = await callLLM(prompt, provider, apiKey, modelName, customUrl);
+        const parsed  = JSON.parse(rawText);
 
-        const baseScore = (parsed.quality || 0) + (parsed.figures || 0) +
-            (parsed.replies || 0) + (parsed.writing || 0);
+        const baseScore   = (parsed.quality || 0) + (parsed.figures || 0) + (parsed.replies || 0) + (parsed.writing || 0);
         const aiDeduction = (parsed.aiDetected && parsed.aiConfidence !== 'low') ? aiDeduct : 0;
-        const finalScore = Math.max(0, Math.min(100, Math.round(baseScore - aiDeduction)));
+        const finalScore  = Math.max(0, Math.min(100, Math.round(baseScore - aiDeduction)));
 
         return {
             author,
@@ -200,22 +233,28 @@ AI signals: perfect bullet structure, phrases like "In conclusion" / "It is impo
                 replies: parsed.replies || 0,
                 writing: parsed.writing || 0
             },
-            aiDetected: parsed.aiDetected && parsed.aiConfidence !== 'low',
+            aiDetected:   parsed.aiDetected && parsed.aiConfidence !== 'low',
             aiConfidence: parsed.aiConfidence || 'low',
-            aiReason: parsed.aiReason || '',
+            aiReason:     parsed.aiReason || '',
             aiDeduction,
-            apaScore: parsed.apaScore || 'none',
-            apaDetails: parsed.apaDetails || '',
+            apaScore:      parsed.apaScore || 'none',
+            apaDetails:    parsed.apaDetails || '',
             figureDetails: parsed.figureDetails || '',
-            replyQuality: parsed.replyQuality || 'none',
-            feedback: parsed.feedback || '',
-            copiedContent: parsed.copiedContent || false,
+            peerRepliesMet:     parsed.peerRepliesMet || false,
+            peerReplyBreakdown: parsed.peerReplyBreakdown || [],
+            peerComment:    parsed.peerComment || '',
+            contentComment: parsed.contentComment || '',
+            apaComment:     parsed.apaComment || '',
+            figureComment:  parsed.figureComment || '',
+            feedback:       parsed.feedback || '',
+            copiedContent:  parsed.copiedContent || false,
             plagiarismNote: parsed.plagiarismNote || '',
             hasFigures,
             hasReferences,
             referenceCount,
             peerRepliesMade,
-            repliedToList
+            repliedToList,
+            minReplies
         };
 
     } catch (err) {
@@ -224,22 +263,15 @@ AI signals: perfect bullet structure, phrases like "In conclusion" / "It is impo
             finalScore: 0,
             grade: 'F',
             breakdown: { quality: 0, figures: 0, replies: 0, writing: 0 },
-            aiDetected: false,
-            aiConfidence: 'low',
-            aiReason: '',
+            aiDetected: false, aiConfidence: 'low', aiReason: '',
             aiDeduction: 0,
-            apaScore: 'none',
-            apaDetails: '',
-            figureDetails: '',
-            replyQuality: 'none',
+            apaScore: 'none', apaDetails: '', figureDetails: '',
+            peerRepliesMet: false, peerReplyBreakdown: [],
+            peerComment: '', contentComment: '', apaComment: '', figureComment: '',
             feedback: 'Grading failed: ' + err.message,
-            copiedContent: false,
-            plagiarismNote: '',
-            hasFigures,
-            hasReferences,
-            referenceCount,
-            peerRepliesMade,
-            repliedToList
+            copiedContent: false, plagiarismNote: '',
+            hasFigures, hasReferences, referenceCount,
+            peerRepliesMade, repliedToList, minReplies
         };
     }
 }
@@ -248,63 +280,58 @@ AI signals: perfect bullet structure, phrases like "In conclusion" / "It is impo
 
 function exportCSV(grades) {
     const header = [
-        'Student Name',
-        'Letter Grade',
-        'Final Score (/100)',
-        'Answer Quality',
-        'References & Figures',
-        'Peer Replies',
-        'Writing Clarity',
-        'APA Score',
-        'APA Details',
-        'Figure Details',
-        'Reply Quality',
-        'AI Detected',
-        'AI Confidence',
-        'AI Reason',
-        'AI Deduction',
-        'Copied Content',
-        'Plagiarism Note',
-        'Peer Replies Made',
-        'Replied To',
-        'Feedback / Comment'
+        'Student Name', 'Letter Grade', 'Final Score (/100)',
+        'Answer Quality', 'References & Figures', 'Peer Replies', 'Writing Clarity',
+        'APA Score', 'APA Details', 'Figure Details',
+        'Min Replies Required', 'Peer Replies Made', 'Replies Requirement Met',
+        'Reply Quality Breakdown', 'Peer Comment',
+        'Content Comment', 'APA Comment', 'Figure Comment',
+        'AI Detected', 'AI Confidence', 'AI Reason', 'AI Deduction',
+        'Copied Content', 'Plagiarism Note',
+        'Replied To', 'Feedback / Comment'
     ].join(',');
 
-    const rows = grades.map(g => [
-        csvEsc(g.author),
-        g.grade || 'N/A',
-        g.finalScore,
-        g.breakdown.quality,
-        g.breakdown.figures,
-        g.breakdown.replies,
-        g.breakdown.writing,
-        g.apaScore || 'none',
-        csvEsc(g.apaDetails || ''),
-        csvEsc(g.figureDetails || ''),
-        g.replyQuality || 'none',
-        g.aiDetected ? 'YES' : 'NO',
-        g.aiConfidence || 'N/A',
-        csvEsc(g.aiReason || ''),
-        g.aiDeduction || 0,
-        g.copiedContent ? 'YES' : 'NO',
-        csvEsc(g.plagiarismNote || ''),
-        g.peerRepliesMade,
-        csvEsc((g.repliedToList || []).join('; ')),
-        csvEsc(g.feedback)
-    ].join(','));
+    const rows = grades.map(g => {
+        const replyBreakdown = (g.peerReplyBreakdown || [])
+            .map(r => `${r.repliedTo} [${r.quality}]: ${r.summary}`)
+            .join(' | ');
 
-    const csv = [header, ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-
-    const now = new Date();
-    const stamp = now.toISOString().slice(0, 10);
-
-    chrome.downloads.download({
-        url,
-        filename: `forum-grades-${stamp}.csv`,
-        saveAs: true
+        return [
+            csvEsc(g.author),
+            g.grade || 'N/A',
+            g.finalScore,
+            g.breakdown.quality,
+            g.breakdown.figures,
+            g.breakdown.replies,
+            g.breakdown.writing,
+            g.apaScore || 'none',
+            csvEsc(g.apaDetails || ''),
+            csvEsc(g.figureDetails || ''),
+            g.minReplies || 2,
+            g.peerRepliesMade,
+            g.peerRepliesMet ? 'YES' : 'NO',
+            csvEsc(replyBreakdown),
+            csvEsc(g.peerComment || ''),
+            csvEsc(g.contentComment || ''),
+            csvEsc(g.apaComment || ''),
+            csvEsc(g.figureComment || ''),
+            g.aiDetected ? 'YES' : 'NO',
+            g.aiConfidence || 'N/A',
+            csvEsc(g.aiReason || ''),
+            g.aiDeduction || 0,
+            g.copiedContent ? 'YES' : 'NO',
+            csvEsc(g.plagiarismNote || ''),
+            csvEsc((g.repliedToList || []).join('; ')),
+            csvEsc(g.feedback)
+        ].join(',');
     });
+
+    const csv  = [header, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    chrome.downloads.download({ url, filename: `forum-grades-${stamp}.csv`, saveAs: true });
 }
 
 function csvEsc(val) {

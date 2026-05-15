@@ -213,7 +213,14 @@
         <div class="mfg-badges">
           ${g.aiDetected ? '<span class="mfg-badge ai">🤖 AI</span>' : ''}
           ${g.copiedContent ? '<span class="mfg-badge plagiarism">⚠ Plagiarism</span>' : ''}
-          ${g.peerRepliesMade > 0 ? `<span class="mfg-badge reply">💬 ${g.peerRepliesMade} replies</span>` : '<span class="mfg-badge warn">⚠ No replies</span>'}
+          ${(() => {
+            const req = g.minReplies || 2;
+            const met = g.peerRepliesMet;
+            const n   = g.peerRepliesMade;
+            if (n === 0) return '<span class="mfg-badge warn">⚠ No replies</span>';
+            if (met) return `<span class="mfg-badge reply-met">💬 ${n}/${req} replies ✓</span>`;
+            return `<span class="mfg-badge reply-unmet">💬 ${n}/${req} replies ✗</span>`;
+          })()}
           ${g.apaScore === 'good' ? '<span class="mfg-badge apa-good">📚 APA ✓</span>' : g.apaScore === 'fair' ? '<span class="mfg-badge apa-fair">📚 APA~</span>' : '<span class="mfg-badge apa-none">📚 No APA</span>'}
           ${g.hasFigures ? '<span class="mfg-badge fig">📊 Figures</span>' : ''}
         </div>
@@ -227,33 +234,70 @@
       </div>
       <div class="mfg-detail">
         <div class="mfg-breakdown">
-          <div class="mfg-bk-item">
-            <span>Answer Quality</span>
-            <span>${g.breakdown.quality}/35</span>
-          </div>
-          <div class="mfg-bk-item">
-            <span>References &amp; Figures</span>
-            <span>${g.breakdown.figures}/20</span>
-          </div>
-          <div class="mfg-bk-item">
-            <span>Peer Replies</span>
-            <span>${g.breakdown.replies}/25</span>
-          </div>
-          <div class="mfg-bk-item">
-            <span>Writing Clarity</span>
-            <span>${g.breakdown.writing}/20</span>
-          </div>
-          ${g.aiDetected ? `<div class="mfg-bk-item red"><span>AI Content Deduction</span><span>-${g.aiDeduction}</span></div>` : ''}
+          <div class="mfg-bk-item"><span>Answer Quality</span><span>${g.breakdown.quality}/${g.breakdown.quality + g.breakdown.figures + g.breakdown.replies + g.breakdown.writing > 0 ? 35 : 35}</span></div>
+          <div class="mfg-bk-item"><span>References &amp; Figures</span><span>${g.breakdown.figures}/20</span></div>
+          <div class="mfg-bk-item"><span>Peer Replies (${g.peerRepliesMade}/${g.minReplies || 2} req.)</span><span>${g.breakdown.replies}/25</span></div>
+          <div class="mfg-bk-item"><span>Writing Clarity</span><span>${g.breakdown.writing}/20</span></div>
+          ${g.aiDetected ? `<div class="mfg-bk-item red"><span>AI Content Deduction</span><span>−${g.aiDeduction}</span></div>` : ''}
         </div>
+
         <div class="mfg-detail-blocks">
-          ${g.apaDetails ? `<div class="mfg-detail-block apa"><span class="mfg-detail-label">📚 APA References (${g.apaScore})</span><p>${g.apaDetails}</p></div>` : ''}
-          ${g.figureDetails ? `<div class="mfg-detail-block fig"><span class="mfg-detail-label">📊 Figures &amp; Examples</span><p>${g.figureDetails}</p></div>` : ''}
-          ${g.replyQuality ? `<div class="mfg-detail-block reply"><span class="mfg-detail-label">💬 Reply Quality: ${g.replyQuality}</span>${g.repliedToList && g.repliedToList.length > 0 ? `<p>Replied to: ${g.repliedToList.join(', ')}</p>` : ''}</div>` : ''}
-          ${g.copiedContent && g.plagiarismNote ? `<div class="mfg-detail-block plagiarism"><span class="mfg-detail-label">⚠ Plagiarism Flag</span><p>${g.plagiarismNote}</p></div>` : ''}
-          ${g.aiReason ? `<div class="mfg-detail-block ai"><span class="mfg-detail-label">🤖 AI Signal</span><p>${g.aiReason}</p></div>` : ''}
+
+          ${g.contentComment ? `
+          <div class="mfg-detail-block content">
+            <span class="mfg-detail-label">📝 Content Analysis</span>
+            <p>${g.contentComment}</p>
+          </div>` : ''}
+
+          ${g.apaComment || g.apaDetails ? `
+          <div class="mfg-detail-block apa">
+            <span class="mfg-detail-label">📚 APA References — <em>${g.apaScore || 'none'}</em></span>
+            <p>${g.apaComment || g.apaDetails}</p>
+          </div>` : ''}
+
+          ${g.figureComment || g.figureDetails ? `
+          <div class="mfg-detail-block fig">
+            <span class="mfg-detail-label">📊 Figures &amp; Examples</span>
+            <p>${g.figureComment || g.figureDetails}</p>
+          </div>` : ''}
+
+          ${(() => {
+            const req = g.minReplies || 2;
+            const bd  = g.peerReplyBreakdown || [];
+            const replyRows = bd.map(r =>
+              `<div class="mfg-reply-row">
+                 <span class="mfg-reply-qual ${r.quality}">${r.quality}</span>
+                 <span class="mfg-reply-who">→ ${r.repliedTo}</span>
+                 <span class="mfg-reply-summary">${r.summary}</span>
+               </div>`
+            ).join('');
+            const metLabel = g.peerRepliesMet
+              ? `<span style="color:#4ade80">${g.peerRepliesMade}/${req} required ✓</span>`
+              : `<span style="color:#f87171">${g.peerRepliesMade}/${req} required ✗</span>`;
+            return `
+          <div class="mfg-detail-block reply">
+            <span class="mfg-detail-label">💬 Peer Engagement — ${metLabel}</span>
+            ${replyRows}
+            ${g.peerComment ? `<p style="margin-top:6px">${g.peerComment}</p>` : ''}
+          </div>`;
+          })()}
+
+          ${g.copiedContent && g.plagiarismNote ? `
+          <div class="mfg-detail-block plagiarism">
+            <span class="mfg-detail-label">⚠ Plagiarism Flag</span>
+            <p>${g.plagiarismNote}</p>
+          </div>` : ''}
+
+          ${g.aiReason ? `
+          <div class="mfg-detail-block ai">
+            <span class="mfg-detail-label">🤖 AI Signal (${g.aiConfidence} confidence)</span>
+            <p>${g.aiReason}</p>
+          </div>` : ''}
+
         </div>
+
         <div class="mfg-feedback">
-          <strong>Feedback:</strong>
+          <strong>Overall Feedback:</strong>
           <p>${g.feedback}</p>
         </div>
       </div>

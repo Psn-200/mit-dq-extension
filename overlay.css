@@ -207,6 +207,18 @@
     border: 1px solid #7f4a15;
 }
 
+.mfg-badge.reply-met {
+    background: #1a2535;
+    color: #7eb3f7;
+    border: 1px solid #2a4a7f;
+}
+
+.mfg-badge.reply-unmet {
+    background: #2a1a1a;
+    color: #f87171;
+    border: 1px solid #7f2a2a;
+}
+
 .mfg-badge.plagiarism {
     background: #2a1a2a;
     color: #e879f9;
@@ -322,11 +334,60 @@
     border-left: 2px solid #2a3045;
 }
 
-.mfg-detail-block.apa { border-left-color: #4f8ef7; }
-.mfg-detail-block.fig { border-left-color: #4ade80; }
-.mfg-detail-block.reply { border-left-color: #7eb3f7; }
+.mfg-detail-block.content    { border-left-color: #a855f7; }
+.mfg-detail-block.apa        { border-left-color: #4f8ef7; }
+.mfg-detail-block.fig        { border-left-color: #4ade80; }
+.mfg-detail-block.reply      { border-left-color: #7eb3f7; }
 .mfg-detail-block.plagiarism { border-left-color: #e879f9; }
-.mfg-detail-block.ai { border-left-color: #f87171; }
+.mfg-detail-block.ai         { border-left-color: #f87171; }
+
+/* Per-reply breakdown rows */
+.mfg-reply-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 4px 0;
+    border-bottom: 1px solid #1e2330;
+    font-size: 11px;
+}
+
+.mfg-reply-row:last-of-type { border-bottom: none; }
+
+.mfg-reply-qual {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.mfg-reply-qual.substantive {
+    background: #1a2a1e;
+    color: #4ade80;
+    border: 1px solid #2a7f4a;
+}
+
+.mfg-reply-qual.generic {
+    background: #2a2215;
+    color: #fb923c;
+    border: 1px solid #7f4a15;
+}
+
+.mfg-reply-who {
+    color: #9ca3af;
+    font-weight: 600;
+    flex-shrink: 0;
+    font-size: 11px;
+}
+
+.mfg-reply-summary {
+    color: #c9c5be;
+    flex: 1;
+    line-height: 1.4;
+}
 
 .mfg-detail-label {
     font-size: 10px;

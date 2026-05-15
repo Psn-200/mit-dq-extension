@@ -6,30 +6,50 @@ const PROVIDERS = {
     gemini: {
         label: 'Google Gemini API Key',
         placeholder: 'AIza...',
-        hint: 'Free tier: 1,500 requests/day. Get key → <a href="#" onclick="return false">ai.google.dev</a>',
-        validate: k => k.startsWith('AIza') && k.length > 20
+        defaultModel: 'gemini-1.5-flash',
+        hint: 'Free — 1,500 req/day. Get key at ai.google.dev',
+        hintClass: 'green',
+        validate: k => k.startsWith('AIza') && k.length > 20,
+        needsKey: true
     },
     groq: {
         label: 'Groq API Key',
         placeholder: 'gsk_...',
-        hint: 'Free tier — very fast Llama 3. Get key → console.groq.com',
-        validate: k => k.startsWith('gsk_') && k.length > 20
+        defaultModel: 'llama-3.3-70b-versatile',
+        hint: 'Free tier — fast Llama 3. Get key at console.groq.com',
+        hintClass: 'green',
+        validate: k => k.startsWith('gsk_') && k.length > 20,
+        needsKey: true
     },
     ollama: {
         label: null,
         placeholder: '',
-        hint: 'No key needed. Ollama must be running on your machine (ollama.com).',
-        validate: () => true
+        defaultModel: 'llama3.2',
+        hint: 'No key needed. Run: ollama serve  (ollama.com)',
+        hintClass: '',
+        validate: () => true,
+        needsKey: false
     },
     anthropic: {
         label: 'Anthropic API Key',
         placeholder: 'sk-ant-...',
-        hint: 'Paid. Get key → console.anthropic.com',
-        validate: k => k.startsWith('sk-ant-') && k.length > 20
+        defaultModel: 'claude-sonnet-4-6',
+        hint: 'Paid. Get key at console.anthropic.com',
+        hintClass: 'yellow',
+        validate: k => k.startsWith('sk-ant-') && k.length > 20,
+        needsKey: true
+    },
+    custom: {
+        label: 'API Key',
+        placeholder: 'sk-...',
+        defaultModel: 'gpt-4o-mini',
+        hint: 'Any OpenAI-compatible API. Set base URL above.',
+        hintClass: '',
+        validate: k => k.length > 5,
+        needsKey: true
     }
 };
 
-// Weight inputs
 const weightInputs = ['w_quality', 'w_figures', 'w_replies', 'w_writing'];
 
 function calcTotal() {
@@ -42,45 +62,68 @@ function calcTotal() {
 
 weightInputs.forEach(id => $(id).addEventListener('input', calcTotal));
 
-function applyProvider(name) {
+function applyProvider(name, keepModelValue) {
     const p = PROVIDERS[name];
-    const isOllama = name === 'ollama';
 
-    $('apiKeySection').style.display = isOllama ? 'none' : 'block';
-    $('ollamaSection').style.display = isOllama ? 'block' : 'none';
-
-    if (!isOllama) {
+    // API key field
+    $('apiKeyField').style.display = p.needsKey ? 'block' : 'none';
+    if (p.needsKey) {
         $('apiKeyLabel').textContent = p.label;
         $('apiKey').placeholder = p.placeholder;
     }
-    $('providerHint').innerHTML = p.hint;
+
+    // Custom URL field
+    $('customUrlField').style.display = name === 'custom' ? 'block' : 'none';
+
+    // Model name field — always shown
+    if (!keepModelValue) {
+        $('modelName').value = p.defaultModel;
+        $('modelName').placeholder = p.defaultModel;
+    }
+
+    // Hint
+    const hint = $('providerHint');
+    hint.textContent = p.hint;
+    hint.className = 'hint' + (p.hintClass ? ' ' + p.hintClass : '');
 }
 
 $('provider').addEventListener('change', () => {
-    applyProvider($('provider').value);
-    chrome.storage.local.set({ provider: $('provider').value });
+    const name = $('provider').value;
+    applyProvider(name, false);
+    chrome.storage.local.set({ provider: name });
 });
 
-// Load saved settings
-chrome.storage.local.get(['apiKey', 'provider', 'ollamaModel', 'weights', 'aiDeduct'], (data) => {
-    if (data.provider) $('provider').value = data.provider;
-    if (data.apiKey) $('apiKey').value = data.apiKey;
-    if (data.ollamaModel) $('ollamaModel').value = data.ollamaModel;
-    if (data.weights) {
-        weightInputs.forEach(id => { if (data.weights[id]) $(id).value = data.weights[id]; });
-    }
-    if (data.aiDeduct !== undefined) $('aiDeduct').value = data.aiDeduct;
-    applyProvider($('provider').value);
-    calcTotal();
+// Persist model name on change
+$('modelName').addEventListener('change', () => {
+    chrome.storage.local.set({ modelName: $('modelName').value.trim() });
 });
-
+$('customUrl').addEventListener('change', () => {
+    chrome.storage.local.set({ customUrl: $('customUrl').value.trim() });
+});
 $('apiKey').addEventListener('change', () => {
     chrome.storage.local.set({ apiKey: $('apiKey').value.trim() });
 });
 
-$('ollamaModel').addEventListener('change', () => {
-    chrome.storage.local.set({ ollamaModel: $('ollamaModel').value.trim() });
-});
+// Load saved settings
+chrome.storage.local.get(
+    ['apiKey', 'provider', 'modelName', 'customUrl', 'weights', 'aiDeduct', 'minReplies'],
+    (data) => {
+        if (data.provider) $('provider').value = data.provider;
+        applyProvider($('provider').value, false);
+
+        if (data.apiKey) $('apiKey').value = data.apiKey;
+        if (data.customUrl) $('customUrl').value = data.customUrl;
+        if (data.modelName) {
+            $('modelName').value = data.modelName;
+        }
+        if (data.weights) {
+            weightInputs.forEach(id => { if (data.weights[id] !== undefined) $(id).value = data.weights[id]; });
+        }
+        if (data.aiDeduct !== undefined) $('aiDeduct').value = data.aiDeduct;
+        if (data.minReplies !== undefined) $('minReplies').value = data.minReplies;
+        calcTotal();
+    }
+);
 
 function setStatus(msg, type = 'info') {
     const el = $('statusMsg');
@@ -89,27 +132,35 @@ function setStatus(msg, type = 'info') {
 }
 
 function setProgress(pct) {
-    const bar = $('progressBar');
-    bar.className = 'progress-bar active';
+    $('progressBar').className = 'progress-bar active';
     $('progressFill').style.width = pct + '%';
-    if (pct >= 100) setTimeout(() => bar.className = 'progress-bar', 800);
+    if (pct >= 100) setTimeout(() => $('progressBar').className = 'progress-bar', 900);
 }
 
-// Grade button
-$('gradeBtn').addEventListener('click', async () => {
-    const provider = $('provider').value;
-    const apiKey = $('apiKey').value.trim();
-    const ollamaModel = $('ollamaModel').value.trim() || 'llama3.2';
+// ── Grade button ────────────────────────────────────────────────────────────
 
-    if (provider !== 'ollama') {
+$('gradeBtn').addEventListener('click', async () => {
+    const provider  = $('provider').value;
+    const apiKey    = $('apiKey').value.trim();
+    const modelName = $('modelName').value.trim() || PROVIDERS[provider].defaultModel;
+    const customUrl = $('customUrl').value.trim();
+
+    const p = PROVIDERS[provider];
+
+    if (p.needsKey) {
         if (!apiKey) {
-            setStatus('Please enter an API key for ' + PROVIDERS[provider].label, 'error');
+            setStatus('Enter an API key for ' + provider, 'error');
             return;
         }
-        if (!PROVIDERS[provider].validate(apiKey)) {
-            setStatus('API key format looks wrong for ' + provider + '. Check it and try again.', 'error');
+        if (!p.validate(apiKey)) {
+            setStatus('API key format looks wrong — double-check it.', 'error');
             return;
         }
+    }
+
+    if (provider === 'custom' && !customUrl) {
+        setStatus('Enter the API base URL for your custom provider.', 'error');
+        return;
     }
 
     const total = calcTotal();
@@ -118,60 +169,61 @@ $('gradeBtn').addEventListener('click', async () => {
         return;
     }
 
-    const weights = {};
+    const weights    = {};
     weightInputs.forEach(id => weights[id] = parseInt($(id).value));
-    const aiDeduct = parseInt($('aiDeduct').value) || 20;
+    const aiDeduct   = parseInt($('aiDeduct').value) || 20;
+    const minReplies = parseInt($('minReplies').value) || 2;
 
-    chrome.storage.local.set({ apiKey, provider, ollamaModel, weights, aiDeduct });
+    chrome.storage.local.set({ apiKey, provider, modelName, customUrl, weights, aiDeduct, minReplies });
 
     $('gradeBtn').disabled = true;
-    setStatus('Scraping forum posts...', 'info');
+    setStatus('Scraping forum posts…', 'info');
     setProgress(10);
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
     chrome.tabs.sendMessage(tab.id, { action: 'SCRAPE_FORUM' }, async (response) => {
         if (chrome.runtime.lastError || !response) {
-            setStatus('Could not read forum. Make sure you are on a Moodle discussion page.', 'error');
+            setStatus('Could not read forum. Open a Moodle discussion page first.', 'error');
             $('gradeBtn').disabled = false;
             return;
         }
 
         if (!response.posts || response.posts.length === 0) {
-            setStatus('No posts found. Open a Moodle forum discussion first.', 'error');
+            setStatus('No posts found on this page.', 'error');
             $('gradeBtn').disabled = false;
             return;
         }
 
         const posts = response.posts;
-        setStatus(`Found ${posts.length} posts. Grading with AI...`, 'info');
-        setProgress(25);
+        setStatus(`Found ${posts.length} posts — grading with ${modelName}…`, 'info');
+        setProgress(30);
 
-        chrome.runtime.sendMessage({
-            action: 'GRADE_POSTS',
-            posts, weights, aiDeduct, apiKey, provider, ollamaModel
-        }, (result) => {
-            if (result && result.error) {
-                setStatus(result.error, 'error');
+        chrome.runtime.sendMessage(
+            { action: 'GRADE_POSTS', posts, weights, aiDeduct, minReplies, apiKey, provider, modelName, customUrl },
+            (result) => {
+                if (result && result.error) {
+                    setStatus(result.error, 'error');
+                    $('gradeBtn').disabled = false;
+                    return;
+                }
+
+                setProgress(100);
+                setStatus(`Graded ${result.grades.length} students with ${modelName}`, 'success');
                 $('gradeBtn').disabled = false;
-                return;
+
+                chrome.storage.local.set({ grades: result.grades, posts }, () => {
+                    chrome.tabs.sendMessage(tab.id, { action: 'SHOW_OVERLAY', grades: result.grades });
+                });
             }
-
-            setProgress(100);
-            setStatus(`Graded ${result.grades.length} students successfully!`, 'success');
-            $('gradeBtn').disabled = false;
-
-            chrome.storage.local.set({ grades: result.grades, posts }, () => {
-                chrome.tabs.sendMessage(tab.id, { action: 'SHOW_OVERLAY', grades: result.grades });
-            });
-        });
+        );
     });
 });
 
 $('showOverlay').addEventListener('click', async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     chrome.storage.local.get(['grades'], (data) => {
-        if (!data.grades) { setStatus('No grades yet. Click Grade first.', 'error'); return; }
+        if (!data.grades) { setStatus('Grade first, then open the dashboard.', 'error'); return; }
         chrome.tabs.sendMessage(tab.id, { action: 'SHOW_OVERLAY', grades: data.grades });
         window.close();
     });
@@ -179,7 +231,7 @@ $('showOverlay').addEventListener('click', async () => {
 
 $('exportCSV').addEventListener('click', () => {
     chrome.storage.local.get(['grades'], (data) => {
-        if (!data.grades) { setStatus('No grades yet. Click Grade first.', 'error'); return; }
+        if (!data.grades) { setStatus('Grade first, then export.', 'error'); return; }
         chrome.runtime.sendMessage({ action: 'EXPORT_CSV', grades: data.grades });
         window.close();
     });
