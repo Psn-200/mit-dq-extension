@@ -183,6 +183,15 @@
         renderSummary(grades);
     }
 
+    function showOverlayToast(msg, type) {
+        const toast = document.getElementById('mfg-toast');
+        if (!toast) return;
+        toast.textContent = msg;
+        toast.className = 'mfg-toast show' + (type === 'error' ? ' mfg-toast-error' : '');
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => { toast.className = 'mfg-toast'; }, 5000);
+    }
+
     function buildOverlayHTML(grades) {
         const avg = grades.reduce((s, g) => s + g.finalScore, 0) / grades.length;
         return `
@@ -197,6 +206,7 @@
       <button id="mfg-close">✕</button>
     </div>
   </div>
+  <div id="mfg-toast" class="mfg-toast"></div>
   <div id="mfg-body">
     <div class="mfg-tabs">
       <button class="mfg-tab active" data-tab="table">📋 Grades</button>
@@ -353,6 +363,18 @@
         document.getElementById('mfg-table-container').innerHTML = html;
     }
 
+    function pageDownload(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
     function renderSummary(grades) {
         const avg = grades.reduce((s, g) => s + g.finalScore, 0) / grades.length;
         const highest = Math.max(...grades.map(g => g.finalScore));
@@ -402,7 +424,38 @@
       ${grades.filter(g => g.lateSubmission?.status === 'late' || g.lateSubmission?.status === 'past-cutoff')
           .map(g => `<div class="mfg-ai-item">${g.author} — ${g.lateSubmission.note}</div>`).join('')}
     </div>` : ''}
+    <div class="mfg-export-row">
+      <button class="mfg-export-btn" id="mfg-ov-csv">📥 Export CSV</button>
+      <button class="mfg-export-btn" id="mfg-ov-json">📤 Export Posts JSON</button>
+    </div>
   `;
+
+        document.getElementById('mfg-ov-csv')?.addEventListener('click', () => {
+            chrome.runtime.sendMessage({
+                action: 'EXPORT_CSV',
+                grades,
+                pageTitle: document.title,
+                pageUrl:   window.location.href
+            }, (r) => {
+                if (!r?.csv) { showOverlayToast('Export failed', 'error'); return; }
+                pageDownload(r.csv, r.filename, 'text/csv;charset=utf-8');
+                showOverlayToast(`✓ Saved to Downloads: ${r.filename}`, 'success');
+            });
+        });
+
+        document.getElementById('mfg-ov-json')?.addEventListener('click', () => {
+            const posts = scrapeMoodleForum();
+            if (!posts.length) { showOverlayToast('No posts found to export', 'error'); return; }
+            chrome.runtime.sendMessage({
+                action: 'EXPORT_POSTS',
+                posts,
+                metadata: { title: document.title, url: window.location.href }
+            }, (r) => {
+                if (!r?.json) { showOverlayToast('Export failed', 'error'); return; }
+                pageDownload(r.json, r.filename, 'application/json');
+                showOverlayToast(`✓ Saved to Downloads: ${r.filename}`, 'success');
+            });
+        });
     }
 
 })();

@@ -11,11 +11,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
     if (msg.action === 'EXPORT_CSV') {
-        exportCSV(msg.grades);
+        sendResponse(buildCSVExport(msg.grades, msg.pageTitle, msg.pageUrl));
         return true;
     }
     if (msg.action === 'EXPORT_POSTS') {
-        exportPostsJSON(msg.posts, msg.metadata);
+        sendResponse(buildPostsExport(msg.posts, msg.metadata));
         return true;
     }
 });
@@ -357,9 +357,20 @@ AI signals: "In conclusion" / "It is important to note" / "Firstly… Secondly�
     }
 }
 
+// ─── HELPERS ────────────────────────────────────────────────────────────────
+
+function extractDiscussionName(str) {
+    if (!str) return 'forum';
+    // Match "DQ1", "DQ 1", "DQ-1", "Assessment 1", "Assignment 1" anywhere in string
+    const m = str.match(/\bDQ\s*[-_]?\s*\d+|\bAssessment\s*\d+|\bAssignment\s*\d+/i);
+    if (m) return m[0].replace(/[\s\-_]+/g, '').toUpperCase(); // → "DQ1", "ASSESSMENT1"
+    if (/\bDQ\b/i.test(str)) return 'DQ';
+    return 'forum';
+}
+
 // ─── CSV EXPORT ─────────────────────────────────────────────────────────────
 
-function exportCSV(grades) {
+function buildCSVExport(grades, pageTitle, pageUrl) {
     const header = [
         'Student Name', 'Letter Grade', 'Final Score (/100)',
         'Answer Quality', 'References & Figures', 'Peer Replies', 'Writing Clarity',
@@ -412,12 +423,12 @@ function exportCSV(grades) {
         ].join(',');
     });
 
-    const csv  = [header, ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url  = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().slice(0, 10);
-
-    chrome.downloads.download({ url, filename: `forum-grades-${stamp}.csv`, saveAs: true });
+    const csv    = [header, ...rows].join('\n');
+    const stamp  = new Date().toISOString().slice(0, 10);
+    const dqName = extractDiscussionName(pageTitle || pageUrl || '');
+    const filename = `${dqName}_grades_${stamp}.csv`;
+    // Return data to caller — download is triggered in popup/content context (MV3 SW can't hold blob URLs)
+    return { csv: '﻿' + csv, filename };
 }
 
 function csvEsc(val) {
@@ -569,7 +580,7 @@ function scoreHeuristics(author, data, weights, minReplies, allTexts) {
 
 // ─── EXPORT POSTS JSON (for local Python grader) ─────────────────────────────
 
-function exportPostsJSON(posts, metadata) {
+function buildPostsExport(posts, metadata) {
     const studentPosts = posts.filter(p => p.idx > 0 || posts.length === 1);
 
     const byAuthor = {};
@@ -614,9 +625,9 @@ function exportPostsJSON(posts, metadata) {
         });
     }
 
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const stamp = new Date().toISOString().slice(0, 10);
-
-    chrome.downloads.download({ url, filename: `forum-posts-${stamp}.json`, saveAs: true });
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    const stamp   = new Date().toISOString().slice(0, 10);
+    const dqName  = extractDiscussionName(metadata?.title || metadata?.url || '');
+    const filename = `${dqName}_posts_${stamp}.json`;
+    return { json: jsonStr, filename };
 }

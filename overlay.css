@@ -524,6 +524,45 @@
     font-family: monospace;
 }
 
+/* Toast notification (save confirmation) */
+.mfg-toast {
+    display: none;
+    padding: 8px 14px;
+    background: #1a2a1e;
+    border-bottom: 2px solid #2a7f4a;
+    color: #7ef7a0;
+    font-size: 11px;
+    font-family: monospace;
+    line-height: 1.5;
+    word-break: break-all;
+    flex-shrink: 0;
+}
+.mfg-toast.show { display: block; }
+.mfg-toast.mfg-toast-error { background: #2a1a1a; border-color: #7f2a2a; color: #f78787; }
+
+/* Export buttons in summary panel */
+.mfg-export-row {
+    display: flex;
+    gap: 8px;
+    padding: 12px 14px;
+    border-top: 1px solid #1e2330;
+}
+
+.mfg-export-btn {
+    flex: 1;
+    padding: 8px;
+    border-radius: 7px;
+    border: 1px solid #2a3045;
+    background: #1a1f2e;
+    color: #9ca3af;
+    font-size: 11px;
+    font-family: 'Sora', 'Segoe UI', sans-serif;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mfg-export-btn:hover { border-color: #4f8ef7; color: #4f8ef7; }
+
 /* Late submission badges */
 .mfg-badge.late {
     background: #2a1f15;

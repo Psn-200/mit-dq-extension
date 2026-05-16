@@ -457,12 +457,33 @@ $('showOverlay').addEventListener('click', async () => {
     });
 });
 
+// ── Download helper — runs in popup context, not service worker ───────────────
+function triggerDownload(content, filename, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url  = URL.createObjectURL(blob);
+    chrome.downloads.download({ url, filename, saveAs: false }, () => {
+        URL.revokeObjectURL(url);
+        if (chrome.runtime.lastError)
+            setStatus('Download failed: ' + chrome.runtime.lastError.message, 'error');
+    });
+}
+
 // ── Export CSV ───────────────────────────────────────────────────────────────
-$('exportCSV').addEventListener('click', () => {
+$('exportCSV').addEventListener('click', async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     chrome.storage.local.get(['grades'], (data) => {
         if (!data.grades) { setStatus('Grade first, then export.', 'error'); return; }
-        chrome.runtime.sendMessage({ action: 'EXPORT_CSV', grades: data.grades });
-        window.close();
+        chrome.runtime.sendMessage({
+            action: 'EXPORT_CSV',
+            grades: data.grades,
+            pageTitle: tab?.title || '',
+            pageUrl:   tab?.url   || ''
+        }, (r) => {
+            if (!r?.csv) { setStatus('Export failed — no data.', 'error'); return; }
+            triggerDownload(r.csv, r.filename, 'text/csv;charset=utf-8');
+            setStatus(`✓ Saved to Downloads:\n${r.filename}`, 'success');
+            setTimeout(() => window.close(), 2800);
+        });
     });
 });
 
@@ -474,7 +495,11 @@ $('exportPosts').addEventListener('click', async () => {
             setStatus('Open a Moodle discussion page first, then export.', 'error'); return;
         }
         const metadata = { url: tab.url, title: tab.title };
-        chrome.runtime.sendMessage({ action: 'EXPORT_POSTS', posts: response.posts, metadata });
-        setStatus(`Exported ${response.posts.length} posts as JSON.`, 'success');
+        chrome.runtime.sendMessage({ action: 'EXPORT_POSTS', posts: response.posts, metadata }, (r) => {
+            if (!r?.json) { setStatus('Export failed — no data.', 'error'); return; }
+            triggerDownload(r.json, r.filename, 'application/json');
+            setStatus(`✓ Saved to Downloads:\n${r.filename}`, 'success');
+            setTimeout(() => window.close(), 2800);
+        });
     });
 });
