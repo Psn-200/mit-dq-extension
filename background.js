@@ -30,6 +30,76 @@ function letterGrade(score) {
     return 'F';
 }
 
+function detectAISignals(text) {
+    const signals = [];
+    const lower = text.toLowerCase();
+    const words = text.split(/\s+/).filter(w => w.length > 1).length;
+
+    const buzzwords = [
+        'in conclusion', 'it is important to note', 'it is worth noting',
+        'plays a crucial role', 'plays a vital role',
+        "in today's rapidly", "in today's world",
+        'delve into', 'embark on', 'tapestry', 'multifaceted',
+        'nuanced', 'underscore', 'paramount', 'pivotal role', 'synergy',
+        'holistic', 'comprehensively', 'notwithstanding',
+        'in the realm of', 'in the context of',
+        'it goes without saying', 'needless to say',
+        'this post will', 'this response will', 'this essay will',
+        'as an ai', "i don't have personal"
+    ];
+    let buzzCount = 0;
+    const foundBuzz = [];
+    for (const phrase of buzzwords) {
+        if (lower.includes(phrase)) { buzzCount++; foundBuzz.push(`"${phrase}"`); }
+    }
+    if (buzzCount >= 2) signals.push(`AI phrases detected: ${foundBuzz.slice(0, 2).join(', ')}`);
+
+    if (/\bfirstly\b/i.test(text) && /\bsecondly\b/i.test(text)) {
+        signals.push('Firstly/Secondly enumeration structure');
+    }
+
+    if (words > 150 && (text.match(/\b(I|me|my|I'm|I've|I'd|I'll|myself)\b/g) || []).length === 0) {
+        signals.push('no first-person voice');
+    }
+
+    if (words > 150 && (text.match(/\b\w+n't\b|\bI'm\b|\bI've\b|\bI'd\b|\bI'll\b|\bwon't\b|\bcan't\b|\bdon't\b/gi) || []).length === 0) {
+        signals.push('no contractions');
+    }
+
+    if (words > 150) {
+        const wl = lower.split(/\s+/).filter(w => /^[a-z]+$/.test(w) && w.length > 2);
+        const ratio = new Set(wl).size / Math.max(wl.length, 1);
+        if (ratio > 0.72) signals.push(`high lexical diversity (${Math.round(ratio * 100)}%)`);
+    }
+
+    const enumCount = (text.match(/^\s*\d+\.|^\s*[-•*]\s+\w/gm) || []).length;
+    if (enumCount >= 4) signals.push(`heavy list structure (${enumCount} items)`);
+
+    const confidence = (signals.length >= 4 || buzzCount >= 5) ? 'high'
+                     : (signals.length >= 2 || buzzCount >= 3) ? 'medium' : 'low';
+
+    return {
+        detected: confidence !== 'low',
+        confidence,
+        signals,
+        reason: signals.length > 0 ? signals.slice(0, 3).join('; ') : ''
+    };
+}
+
+function calcSimilarity(text1, text2) {
+    function ngrams(t, n) {
+        const words = t.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(w => w.length > 2);
+        const grams = new Set();
+        for (let i = 0; i <= words.length - n; i++) grams.add(words.slice(i, i + n).join(' '));
+        return grams;
+    }
+    const g1 = ngrams(text1, 5), g2 = ngrams(text2, 5);
+    if (g1.size < 3 || g2.size < 3) return 0;
+    let shared = 0;
+    for (const g of g1) if (g2.has(g)) shared++;
+    return shared / Math.min(g1.size, g2.size);
+}
+
 // ─── LLM ROUTER ─────────────────────────────────────────────────────────────
 
 async function callLLM(prompt, provider, apiKey, modelName, customUrl) {
@@ -234,6 +304,7 @@ AI signals: "In conclusion" / "It is important to note" / "Firstly… Secondly�
 
         return {
             author,
+            submissionDate: answer.date || '',
             finalScore,
             grade: letterGrade(finalScore),
             breakdown: {
@@ -269,6 +340,7 @@ AI signals: "In conclusion" / "It is important to note" / "Firstly… Secondly�
     } catch (err) {
         return {
             author,
+            submissionDate: answer.date || '',
             finalScore: 0,
             grade: 'F',
             breakdown: { quality: 0, figures: 0, replies: 0, writing: 0 },
@@ -297,7 +369,8 @@ function exportCSV(grades) {
         'Content Comment', 'APA Comment', 'Figure Comment',
         'AI Detected', 'AI Confidence', 'AI Reason', 'AI Deduction',
         'Copied Content', 'Plagiarism Note',
-        'Replied To', 'Feedback / Comment'
+        'Replied To', 'Feedback / Comment',
+        'Submission Date', 'Late Status', 'Days Late', 'Late Penalty Pts'
     ].join(',');
 
     const rows = grades.map(g => {
@@ -331,7 +404,11 @@ function exportCSV(grades) {
             g.copiedContent ? 'YES' : 'NO',
             csvEsc(g.plagiarismNote || ''),
             csvEsc((g.repliedToList || []).join('; ')),
-            csvEsc(g.feedback)
+            csvEsc(g.feedback),
+            csvEsc(g.submissionDate || ''),
+            (g.lateSubmission?.status || 'on-time'),
+            (g.lateSubmission?.daysLate || 0),
+            (g.latePenaltyPts || 0)
         ].join(',');
     });
 
@@ -365,15 +442,17 @@ function gradeHeuristics({ posts, weights, minReplies }) {
         else if (!byAuthor[p.author].answer)  byAuthor[p.author].answer = p;
     });
 
+    const allTexts = Object.values(byAuthor).filter(d => d.answer).map(d => d.answer.body);
+
     const grades = [];
     for (const author of Object.keys(byAuthor)) {
         if (!byAuthor[author].answer) continue;
-        grades.push(scoreHeuristics(author, byAuthor[author], weights, req));
+        grades.push(scoreHeuristics(author, byAuthor[author], weights, req, allTexts));
     }
     return { grades };
 }
 
-function scoreHeuristics(author, data, weights, minReplies) {
+function scoreHeuristics(author, data, weights, minReplies, allTexts) {
     const { answer, replies } = data;
     const text = answer.body;
 
@@ -390,56 +469,95 @@ function scoreHeuristics(author, data, weights, minReplies) {
     const peerRepliesMade = replies.length;
     const peerRepliesMet  = peerRepliesMade >= minReplies;
 
-    // ── Quality: based on word count (300 words ≈ good answer) ────────────
-    const quality = Math.round(weights.w_quality * Math.min(1, words / 350));
+    // AI signal detection
+    const aiResult = detectAISignals(text);
 
-    // ── APA + Figures ──────────────────────────────────────────────────────
+    // Plagiarism: 5-gram similarity vs other submissions
+    let copiedContent = false, plagiarismNote = '';
+    const otherTexts = (allTexts || []).filter(t => t !== text);
+    let maxSim = 0;
+    for (const other of otherTexts) {
+        const sim = calcSimilarity(text, other);
+        if (sim > maxSim) maxSim = sim;
+    }
+    if (maxSim > 0.35) {
+        copiedContent = true;
+        plagiarismNote = `High text overlap with another submission (${Math.round(maxSim * 100)}% 5-gram similarity). Manual review recommended.`;
+    }
+
+    // Peer reply breakdown from scraped reply data
+    const peerReplyBreakdown = replies.map(r => {
+        const rWords = r.body.split(/\s+/).filter(w => w.length > 1).length;
+        const hasAck = /\b(you mentioned|you said|your point|I agree|great point|building on|you noted|in response to|as you pointed)\b/i.test(r.body);
+        const quality = (rWords >= 50 || hasAck) ? 'substantive' : 'generic';
+        return {
+            repliedTo: r.repliedTo?.[0] || 'classmate',
+            quality,
+            summary: r.body.substring(0, 120).trim() + (r.body.length > 120 ? '…' : '')
+        };
+    });
+
+    // Quality score: word count + structure
+    let qualPct = Math.min(1, words / 350);
+    if (paragraphs >= 3) qualPct = Math.min(1, qualPct + 0.05);
+    if (sentences >= 5 && sentences / Math.max(paragraphs, 1) >= 3) qualPct = Math.min(1, qualPct + 0.05);
+    const quality = Math.round(weights.w_quality * qualPct);
+
+    // APA + Figures
     let figPct = 0;
-    if (citCount >= 2 && hasRefList) figPct = 1.0;
+    if (citCount >= 2 && hasRefList)      figPct = 1.0;
     else if (citCount >= 1 && hasRefList) figPct = 0.75;
-    else if (citCount >= 1) figPct = 0.5;
-    else if (hasFigures) figPct = 0.25;
-    if (hasFigures && citCount > 0) figPct = Math.min(1, figPct + 0.15);
+    else if (citCount >= 1)               figPct = 0.5;
+    else if (hasFigures)                  figPct = 0.25;
+    if (hasFigures && citCount > 0)       figPct = Math.min(1, figPct + 0.15);
     const figures = Math.round(weights.w_figures * figPct);
 
-    // ── Peer replies ───────────────────────────────────────────────────────
+    // Peer replies
+    const substantiveReplies = peerReplyBreakdown.filter(r => r.quality === 'substantive').length;
     let repPct = 0;
-    if (peerRepliesMet)        repPct = 0.80; // can't assess quality without AI
-    else if (peerRepliesMade > 0) repPct = (peerRepliesMade / minReplies) * 0.7;
+    if (peerRepliesMet) {
+        repPct = substantiveReplies >= minReplies ? 1.0 : 0.80;
+    } else if (peerRepliesMade > 0) {
+        repPct = (peerRepliesMade / minReplies) * 0.7;
+    }
     const repliesScore = Math.round(weights.w_replies * repPct);
 
-    // ── Writing: sentence structure heuristic ─────────────────────────────
+    // Writing quality
     const avgLen = words / Math.max(sentences, 1);
     const goodStructure = paragraphs >= 2 && avgLen >= 8 && avgLen <= 40;
     const writing = Math.round(weights.w_writing * (goodStructure ? 0.75 : paragraphs >= 1 ? 0.45 : 0.20));
 
-    const finalScore = Math.min(100, quality + figures + repliesScore + writing);
+    const rawScore  = Math.min(100, quality + figures + repliesScore + writing);
+    const aiDeduction = (aiResult.detected && aiResult.confidence !== 'low') ? 20 : 0;
+    const finalScore  = Math.max(0, rawScore - aiDeduction);
 
-    const apaLabel = citCount >= 2 && hasRefList ? 'good'
-                   : citCount >= 1               ? 'fair'
-                   : 'none';
+    const apaLabel = citCount >= 2 && hasRefList ? 'good' : citCount >= 1 ? 'fair' : 'none';
 
     return {
         author,
+        submissionDate: answer.date || '',
         finalScore,
         grade: letterGrade(finalScore),
         gradingMode: 'heuristics',
         breakdown: { quality, figures, replies: repliesScore, writing },
-        aiDetected: false, aiConfidence: 'low', aiReason: '',
-        aiDeduction: 0,
+        aiDetected: aiResult.detected && aiResult.confidence !== 'low',
+        aiConfidence: aiResult.confidence,
+        aiReason: aiResult.reason,
+        aiDeduction,
         apaScore: apaLabel,
         apaDetails: citCount > 0
-            ? `${citCount} APA citation(s) found (${apaMatches.slice(0,2).join(', ')})${hasRefList ? ' + reference list present.' : ' — no reference list detected.'}`
+            ? `${citCount} APA citation(s) found (${apaMatches.slice(0, 2).join(', ')})${hasRefList ? ' + reference list present.' : ' — no reference list detected.'}`
             : 'No APA citations detected.',
         figureDetails: hasFigures ? 'Figure, table or chart keyword detected in post.' : 'No figures or tables found.',
         peerRepliesMet,
-        peerReplyBreakdown: [],
-        peerComment: `${peerRepliesMade}/${minReplies} required replies made. ${peerRepliesMet ? 'Requirement met.' : 'Requirement NOT met.'} (Reply quality not assessed — use AI grading for quality analysis.)`,
-        contentComment: `${words} words across ~${paragraphs} paragraph(s), ${sentences} sentences (avg ${Math.round(avgLen)} words each). Heuristic estimate only — use AI grading for qualitative analysis.`,
-        apaComment: citCount > 0 ? `${citCount} in-text citation(s) detected. ${hasRefList ? 'Reference list found.' : 'No reference list section found.'}` : 'No APA citations found in post.',
+        peerReplyBreakdown,
+        peerComment: `${peerRepliesMade}/${minReplies} required replies made. ${peerRepliesMet ? 'Requirement met.' : 'Requirement NOT met.'} ${substantiveReplies > 0 ? `${substantiveReplies} substantive reply/replies detected (≥50 words or explicit engagement).` : 'Replies appear brief/generic.'} (Use AI grading for deeper quality analysis.)`,
+        contentComment: `${words} words across ~${paragraphs} paragraph(s), ${sentences} sentences (avg ${Math.round(avgLen)} words/sentence). ${words >= 350 ? 'Meets recommended length.' : 'Below recommended 350-word threshold.'} ${citCount > 0 ? `${citCount} APA citation(s) detected.` : 'No citations found.'} Heuristic estimate only.`,
+        apaComment: citCount > 0 ? `${citCount} in-text citation(s) detected. ${hasRefList ? 'Reference list section found.' : 'No reference list section found.'}` : 'No APA citations found in post.',
         figureComment: hasFigures ? 'Visual content or figure references detected.' : 'No visual content detected.',
-        feedback: `⚡ Heuristic estimate (no AI used). ${words} words · ${citCount} APA citation(s) · ${peerRepliesMade}/${minReplies} peer replies. For qualitative feedback, APA accuracy, and AI detection, run with an AI provider or the local Python grader.`,
-        copiedContent: false, plagiarismNote: '',
+        feedback: `⚡ Heuristic estimate (no AI used). ${words} words · ${citCount} APA citation(s) · ${peerRepliesMade}/${minReplies} peer replies · ${aiResult.detected ? `AI signal (${aiResult.confidence} confidence): ${aiResult.reason}` : 'no strong AI signal'}. For qualitative feedback, use an AI provider.`,
+        copiedContent,
+        plagiarismNote,
         hasFigures,
         hasReferences: hasRefList || citCount > 0,
         referenceCount: citCount,

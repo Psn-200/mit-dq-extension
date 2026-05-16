@@ -3,6 +3,29 @@ https://iauonline.net/mod/forum/discuss.php?d=38834&mode=1
 here is discussion question and i need to pull all the answers from each participants, on how many other students they reply and i need to grade them , the quality of answers with describtion ,figures, plagarism or copied content, ai content and all , is there way i could make extension or some form and use on grading
 
 
+Added Condition: 
+
+| Week   | Start         | End           | DQ Deadline (Fri)           | DQ Cutoff (Mon)             | Assessment Deadline (Sun)   | Assessment Cutoff (Wed)     |
+| ------ | ------------- | ------------- | --------------------------- | --------------------------- | --------------------------- | --------------------------- |
+| Week 1 | May 4, 2026   | May 10, 2026  | May 8, 2026, 11:59 PM NPT   | May 11, 2026, 11:59 PM NPT  | May 10, 2026, 11:59 PM NPT  | May 13, 2026, 11:59 PM NPT  |
+| Week 2 | May 11, 2026  | May 17, 2026  | May 15, 2026, 11:59 PM NPT  | May 18, 2026, 11:59 PM NPT  | May 17, 2026, 11:59 PM NPT  | May 20, 2026, 11:59 PM NPT  |
+| Week 3 | May 18, 2026  | May 24, 2026  | May 22, 2026, 11:59 PM NPT  | May 25, 2026, 11:59 PM NPT  | May 24, 2026, 11:59 PM NPT  | May 27, 2026, 11:59 PM NPT  |
+| Week 4 | May 25, 2026  | May 31, 2026  | May 29, 2026, 11:59 PM NPT  | June 1, 2026, 11:59 PM NPT  | May 31, 2026, 11:59 PM NPT  | June 3, 2026, 11:59 PM NPT  |
+| Week 5 | June 1, 2026  | June 7, 2026  | June 5, 2026, 11:59 PM NPT  | June 8, 2026, 11:59 PM NPT  | June 7, 2026, 11:59 PM NPT  | June 10, 2026, 11:59 PM NPT |
+| Week 6 | June 8, 2026  | June 14, 2026 | June 12, 2026, 11:59 PM NPT | June 15, 2026, 11:59 PM NPT | June 14, 2026, 11:59 PM NPT | June 17, 2026, 11:59 PM NPT |
+| Week 7 | June 15, 2026 | June 21, 2026 | June 19, 2026, 11:59 PM NPT | June 22, 2026, 11:59 PM NPT | June 21, 2026, 11:59 PM NPT | June 24, 2026, 11:59 PM NPT |
+| Week 8 | June 22, 2026 | June 28, 2026 | June 26, 2026, 11:59 PM NPT | June 29, 2026, 11:59 PM NPT | June 28, 2026, 11:59 PM NPT | July 1, 2026, 11:59 PM NPT  |
+
+
+Please note that for the Summer I 2026 term (May 4 – June 28, 2026), the assignment and discussion deadlines follow the standardized schedule provided. Students are expected to submit their work by the specified deadlines.
+
+However, a late submission grace period of three (3) days will be allowed after the official deadline. During this period, assignments may still be submitted with the following penalty policy:
+
+•⁠  ⁠1 day late: 10% deduction from the total score
+•⁠  ⁠2 days late: 20% deduction from the total score
+•⁠  ⁠3 days late: 30% deduction from the total score
+
+
 
 The best approach is a Chrome Extension that:
 

@@ -523,3 +523,20 @@
     padding: 3px 0;
     font-family: monospace;
 }
+
+/* Late submission badges */
+.mfg-badge.late {
+    background: #2a1f15;
+    color: #fb923c;
+    border: 1px solid #7f4a15;
+}
+
+.mfg-badge.late-reject {
+    background: #2a1515;
+    color: #f87171;
+    border: 1px solid #7f2020;
+}
+
+.mfg-detail-block.late {
+    border-left-color: #fb923c;
+}

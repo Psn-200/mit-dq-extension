@@ -279,6 +279,21 @@
         }
 
         .btn-sm:hover { border-color: #4f8ef7; color: #4f8ef7; }
+
+        select.rule-select {
+            width: 84px;
+            background: #0d0f14;
+            border: 1px solid #3b3f52;
+            border-radius: 6px;
+            padding: 5px 3px;
+            color: #4f8ef7;
+            font-family: 'Space Mono', monospace;
+            font-size: 9px;
+            font-weight: 700;
+            outline: none;
+            flex-shrink: 0;
+            cursor: pointer;
+        }
     </style>
 </head>
 
@@ -370,6 +385,35 @@
                     <span>Points deducted if AI writing detected</span>
                 </div>
                 <input type="number" class="rule-input" id="aiDeduct" value="20" min="0" max="100" />
+            </div>
+
+            <div class="rule-row">
+                <div class="rule-text">
+                    <strong>Submission type</strong>
+                    <span>DQ (Fri deadline) · Assessment (Sun)</span>
+                </div>
+                <select class="rule-select" id="submissionType">
+                    <option value="dq">DQ</option>
+                    <option value="assessment">Assess</option>
+                </select>
+            </div>
+
+            <div class="rule-row">
+                <div class="rule-text">
+                    <strong>Week (Summer I 2026)</strong>
+                    <span>Late penalty applied per schedule</span>
+                </div>
+                <select class="rule-select" id="weekNumber">
+                    <option value="auto">Auto</option>
+                    <option value="1">Wk 1</option>
+                    <option value="2">Wk 2</option>
+                    <option value="3">Wk 3</option>
+                    <option value="4">Wk 4</option>
+                    <option value="5">Wk 5</option>
+                    <option value="6">Wk 6</option>
+                    <option value="7">Wk 7</option>
+                    <option value="8">Wk 8</option>
+                </select>
             </div>
         </div>
 

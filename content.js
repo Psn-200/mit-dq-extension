@@ -32,36 +32,66 @@
         const allAuthors = [];
 
         postEls.forEach((el, idx) => {
-            // Author
-            const authorEl = el.querySelector(
-                '.author a, .by a, [data-name], .username, h4 a, .poster-name, ' +
-                '[data-region="author-name"], .fullname'
-            );
-            const author = authorEl ? authorEl.textContent.trim() : `User ${idx + 1}`;
+            // ── Author ─────────────────────────────────────────────────────────
+            // IAU Online Moodle: aria-label="Subject by Author Name" on .forumpost div
+            let author = '';
+            const forumDiv = el.querySelector('.forumpost[aria-label]');
+            if (forumDiv) {
+                const label = forumDiv.getAttribute('aria-label') || '';
+                const byIdx = label.lastIndexOf(' by ');
+                if (byIdx !== -1) author = label.substring(byIdx + 4).trim();
+            }
+            // Fallback: user profile link "by <a href='user/view.php...'>Name</a>"
+            if (!author) {
+                const userLink = el.querySelector('a[href*="user/view.php"]');
+                if (userLink) author = userLink.textContent.trim();
+            }
+            // Fallback: legacy selectors for other Moodle themes
+            if (!author) {
+                const authorEl = el.querySelector(
+                    '[data-region="author-name"], .author a, .by a, .poster-name, .fullname, .username'
+                );
+                if (authorEl) author = authorEl.textContent.trim();
+            }
+            if (!author) author = `User ${idx + 1}`;
 
-            // Subject / title
+            // ── Subject ────────────────────────────────────────────────────────
             const subjectEl = el.querySelector(
-                '.subject, .posttitle, [data-region="post-title"], h3, h4'
+                '[data-region-content="forum-post-core-subject"], .subject, .posttitle, [data-region="post-title"], h3, h4'
             );
             const subject = subjectEl ? subjectEl.textContent.trim() : '';
 
-            // Body content
+            // ── Body content ───────────────────────────────────────────────────
             const bodyEl = el.querySelector(
-                '.posting, .post-content-container, [data-region="post-body"], ' +
+                '.post-content-container, .posting, [data-region="post-body"], ' +
                 '.forumpost-body, .content .post, .message'
             );
             const body = bodyEl ? bodyEl.innerText.trim() : el.innerText.trim();
 
-            // Post ID and parent (for reply detection)
-            const postId = el.id || el.getAttribute('data-post-id') || String(idx);
-            const parentId = el.getAttribute('data-parent-id') ||
-                el.closest('[data-parent]')?.getAttribute('data-parent') || null;
+            // ── Post ID — numeric from data-post-id (strip leading 'p' from id) ─
+            const postId = el.getAttribute('data-post-id')
+                || (el.id ? el.id.replace(/^p/, '') : String(idx));
 
-            // Date
+            // ── Parent ID — from "Permanent link to the parent of this post" ────
+            // href ends with #p{parentPostId}
+            const parentLink = el.querySelector('[title="Permanent link to the parent of this post"]');
+            const parentHref = parentLink?.getAttribute('href') || '';
+            const parentMatch = parentHref.match(/#p(\d+)$/);
+            const parentId = parentMatch ? parentMatch[1]
+                : el.getAttribute('data-parent-id')
+                || el.closest('[data-parent]')?.getAttribute('data-parent')
+                || null;
+
+            // ── Date — prefer time[datetime] ISO attribute ─────────────────────
+            const timeEl = el.querySelector('time[datetime]');
             const dateEl = el.querySelector('.time, .date, time, .posteddate');
-            const date = dateEl ? dateEl.textContent.trim() : '';
+            const dataTs = el.getAttribute('data-timestamp')
+                || el.querySelector('[data-timestamp]')?.getAttribute('data-timestamp');
+            const date = timeEl?.getAttribute('datetime')
+                || (dataTs ? new Date(parseInt(dataTs) * 1000).toISOString() : '')
+                || (dateEl ? dateEl.textContent.trim() : '');
 
-            // Has images/figures?
+            // ── Images ─────────────────────────────────────────────────────────
             const images = el.querySelectorAll('img:not([width="1"]):not([height="1"])').length;
 
             if (body.length > 20) {
@@ -223,6 +253,11 @@
           })()}
           ${g.apaScore === 'good' ? '<span class="mfg-badge apa-good">📚 APA ✓</span>' : g.apaScore === 'fair' ? '<span class="mfg-badge apa-fair">📚 APA~</span>' : '<span class="mfg-badge apa-none">📚 No APA</span>'}
           ${g.hasFigures ? '<span class="mfg-badge fig">📊 Figures</span>' : ''}
+          ${g.lateSubmission?.status === 'past-cutoff'
+              ? '<span class="mfg-badge late-reject">⏰ Rejected</span>'
+              : g.lateSubmission?.status === 'late'
+              ? `<span class="mfg-badge late">⏰ ${g.lateSubmission.daysLate}d late</span>`
+              : ''}
         </div>
         <div class="mfg-score-col">
           <div class="mfg-score" style="color:${getScoreColor(g.finalScore)}">${g.finalScore}</div>
@@ -239,6 +274,11 @@
           <div class="mfg-bk-item"><span>Peer Replies (${g.peerRepliesMade}/${g.minReplies || 2} req.)</span><span>${g.breakdown.replies}/25</span></div>
           <div class="mfg-bk-item"><span>Writing Clarity</span><span>${g.breakdown.writing}/20</span></div>
           ${g.aiDetected ? `<div class="mfg-bk-item red"><span>AI Content Deduction</span><span>−${g.aiDeduction}</span></div>` : ''}
+          ${g.lateSubmission?.status === 'past-cutoff'
+              ? `<div class="mfg-bk-item red"><span>Past Cutoff — Not Accepted</span><span>−${g.latePenaltyPts || 0}</span></div>`
+              : (g.latePenaltyPts || 0) > 0
+              ? `<div class="mfg-bk-item red"><span>Late Submission (${g.lateSubmission.daysLate}d × −10%)</span><span>−${g.latePenaltyPts}</span></div>`
+              : ''}
         </div>
 
         <div class="mfg-detail-blocks">
@@ -294,6 +334,12 @@
             <p>${g.aiReason}</p>
           </div>` : ''}
 
+          ${g.lateSubmission?.status && g.lateSubmission.status !== 'on-time' && g.lateSubmission.status !== 'unknown' ? `
+          <div class="mfg-detail-block late">
+            <span class="mfg-detail-label">⏰ Late Submission — ${g.lateSubmission.status === 'past-cutoff' ? 'REJECTED' : g.lateSubmission.daysLate + ' Day' + (g.lateSubmission.daysLate > 1 ? 's' : '') + ' Late'}</span>
+            <p>${g.lateSubmission.note}${g.submissionDate ? `<br><small style="color:#6b7280;font-size:10px">Submitted: ${g.submissionDate}</small>` : ''}</p>
+          </div>` : ''}
+
         </div>
 
         <div class="mfg-feedback">
@@ -313,6 +359,7 @@
         const lowest = Math.min(...grades.map(g => g.finalScore));
         const aiCount = grades.filter(g => g.aiDetected).length;
         const noReplies = grades.filter(g => g.peerRepliesMade === 0).length;
+        const lateCount = grades.filter(g => g.lateSubmission?.status === 'late' || g.lateSubmission?.status === 'past-cutoff').length;
 
         const dist = [
             { label: '90–100', count: grades.filter(g => g.finalScore >= 90).length, color: '#4ade80' },
@@ -331,6 +378,7 @@
       <div class="mfg-stat"><div class="mfg-stat-val" style="color:#f87171">${lowest}</div><div class="mfg-stat-lbl">Lowest</div></div>
       <div class="mfg-stat"><div class="mfg-stat-val" style="color:#f87171">${aiCount}</div><div class="mfg-stat-lbl">AI Flagged</div></div>
       <div class="mfg-stat"><div class="mfg-stat-val" style="color:#fb923c">${noReplies}</div><div class="mfg-stat-lbl">No Replies</div></div>
+      <div class="mfg-stat"><div class="mfg-stat-val" style="color:#fb923c">${lateCount}</div><div class="mfg-stat-lbl">Late/Rejected</div></div>
     </div>
     <div class="mfg-dist-title">Score Distribution</div>
     <div class="mfg-dist">
@@ -348,6 +396,12 @@
       <strong>🤖 AI-Flagged Students</strong>
       ${grades.filter(g => g.aiDetected).map(g => `<div class="mfg-ai-item">${g.author} — ${g.finalScore}/100 (−${g.aiDeduction} pts)</div>`).join('') || '<div style="color:#6b7280;font-size:11px">None detected</div>'}
     </div>
+    ${lateCount > 0 ? `
+    <div class="mfg-ai-list" style="border-top: 1px solid #1e2330; margin-top: 6px;">
+      <strong style="color:#fb923c">⏰ Late Submissions</strong>
+      ${grades.filter(g => g.lateSubmission?.status === 'late' || g.lateSubmission?.status === 'past-cutoff')
+          .map(g => `<div class="mfg-ai-item">${g.author} — ${g.lateSubmission.note}</div>`).join('')}
+    </div>` : ''}
   `;
     }
 
