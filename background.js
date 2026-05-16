@@ -5,8 +5,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         gradePosts(msg).then(r => sendResponse(r)).catch(e => sendResponse({ error: e.message }));
         return true;
     }
+    if (msg.action === 'GRADE_HEURISTICS') {
+        try { sendResponse(gradeHeuristics(msg)); }
+        catch (e) { sendResponse({ error: e.message }); }
+        return true;
+    }
     if (msg.action === 'EXPORT_CSV') {
         exportCSV(msg.grades);
+        return true;
+    }
+    if (msg.action === 'EXPORT_POSTS') {
+        exportPostsJSON(msg.posts, msg.metadata);
         return true;
     }
 });
@@ -340,4 +349,156 @@ function csvEsc(val) {
         return '"' + str.replace(/"/g, '""') + '"';
     }
     return str;
+}
+
+// ─── HEURISTICS GRADER (instant, no AI) ─────────────────────────────────────
+
+function gradeHeuristics({ posts, weights, minReplies }) {
+    const req = minReplies || 2;
+    const studentPosts = posts.filter(p => p.idx > 0 || posts.length === 1);
+
+    const byAuthor = {};
+    studentPosts.forEach(p => {
+        if (!byAuthor[p.author]) byAuthor[p.author] = { answer: null, replies: [] };
+        if (p.isAnswer)                       byAuthor[p.author].answer = p;
+        else if (p.isPeerReply)               byAuthor[p.author].replies.push(p);
+        else if (!byAuthor[p.author].answer)  byAuthor[p.author].answer = p;
+    });
+
+    const grades = [];
+    for (const author of Object.keys(byAuthor)) {
+        if (!byAuthor[author].answer) continue;
+        grades.push(scoreHeuristics(author, byAuthor[author], weights, req));
+    }
+    return { grades };
+}
+
+function scoreHeuristics(author, data, weights, minReplies) {
+    const { answer, replies } = data;
+    const text = answer.body;
+
+    const words      = text.split(/\s+/).filter(w => w.length > 1).length;
+    const sentences  = text.split(/[.!?]+/).filter(s => s.trim().length > 5).length;
+    const paragraphs = text.split(/\n+/).filter(p => p.trim().length > 20).length;
+
+    // APA detection
+    const apaMatches   = text.match(/\([A-Z][a-zA-Z\-]+(?:\s+et\s+al\.)?,\s+\d{4}\)/g) || [];
+    const citCount     = apaMatches.length;
+    const hasRefList   = /\b(references|bibliography)\b/i.test(text);
+    const hasFigures   = (answer.images || 0) > 0 ||
+                         /\b(figure|table|chart|graph|diagram)\b/i.test(text);
+    const peerRepliesMade = replies.length;
+    const peerRepliesMet  = peerRepliesMade >= minReplies;
+
+    // ── Quality: based on word count (300 words ≈ good answer) ────────────
+    const quality = Math.round(weights.w_quality * Math.min(1, words / 350));
+
+    // ── APA + Figures ──────────────────────────────────────────────────────
+    let figPct = 0;
+    if (citCount >= 2 && hasRefList) figPct = 1.0;
+    else if (citCount >= 1 && hasRefList) figPct = 0.75;
+    else if (citCount >= 1) figPct = 0.5;
+    else if (hasFigures) figPct = 0.25;
+    if (hasFigures && citCount > 0) figPct = Math.min(1, figPct + 0.15);
+    const figures = Math.round(weights.w_figures * figPct);
+
+    // ── Peer replies ───────────────────────────────────────────────────────
+    let repPct = 0;
+    if (peerRepliesMet)        repPct = 0.80; // can't assess quality without AI
+    else if (peerRepliesMade > 0) repPct = (peerRepliesMade / minReplies) * 0.7;
+    const repliesScore = Math.round(weights.w_replies * repPct);
+
+    // ── Writing: sentence structure heuristic ─────────────────────────────
+    const avgLen = words / Math.max(sentences, 1);
+    const goodStructure = paragraphs >= 2 && avgLen >= 8 && avgLen <= 40;
+    const writing = Math.round(weights.w_writing * (goodStructure ? 0.75 : paragraphs >= 1 ? 0.45 : 0.20));
+
+    const finalScore = Math.min(100, quality + figures + repliesScore + writing);
+
+    const apaLabel = citCount >= 2 && hasRefList ? 'good'
+                   : citCount >= 1               ? 'fair'
+                   : 'none';
+
+    return {
+        author,
+        finalScore,
+        grade: letterGrade(finalScore),
+        gradingMode: 'heuristics',
+        breakdown: { quality, figures, replies: repliesScore, writing },
+        aiDetected: false, aiConfidence: 'low', aiReason: '',
+        aiDeduction: 0,
+        apaScore: apaLabel,
+        apaDetails: citCount > 0
+            ? `${citCount} APA citation(s) found (${apaMatches.slice(0,2).join(', ')})${hasRefList ? ' + reference list present.' : ' — no reference list detected.'}`
+            : 'No APA citations detected.',
+        figureDetails: hasFigures ? 'Figure, table or chart keyword detected in post.' : 'No figures or tables found.',
+        peerRepliesMet,
+        peerReplyBreakdown: [],
+        peerComment: `${peerRepliesMade}/${minReplies} required replies made. ${peerRepliesMet ? 'Requirement met.' : 'Requirement NOT met.'} (Reply quality not assessed — use AI grading for quality analysis.)`,
+        contentComment: `${words} words across ~${paragraphs} paragraph(s), ${sentences} sentences (avg ${Math.round(avgLen)} words each). Heuristic estimate only — use AI grading for qualitative analysis.`,
+        apaComment: citCount > 0 ? `${citCount} in-text citation(s) detected. ${hasRefList ? 'Reference list found.' : 'No reference list section found.'}` : 'No APA citations found in post.',
+        figureComment: hasFigures ? 'Visual content or figure references detected.' : 'No visual content detected.',
+        feedback: `⚡ Heuristic estimate (no AI used). ${words} words · ${citCount} APA citation(s) · ${peerRepliesMade}/${minReplies} peer replies. For qualitative feedback, APA accuracy, and AI detection, run with an AI provider or the local Python grader.`,
+        copiedContent: false, plagiarismNote: '',
+        hasFigures,
+        hasReferences: hasRefList || citCount > 0,
+        referenceCount: citCount,
+        peerRepliesMade,
+        repliedToList: replies.map(r => r.repliedTo).flat().filter(Boolean),
+        minReplies
+    };
+}
+
+// ─── EXPORT POSTS JSON (for local Python grader) ─────────────────────────────
+
+function exportPostsJSON(posts, metadata) {
+    const studentPosts = posts.filter(p => p.idx > 0 || posts.length === 1);
+
+    const byAuthor = {};
+    studentPosts.forEach(p => {
+        if (!byAuthor[p.author]) byAuthor[p.author] = { answer: null, replies: [] };
+        if (p.isAnswer)                       byAuthor[p.author].answer = p;
+        else if (p.isPeerReply)               byAuthor[p.author].replies.push(p);
+        else if (!byAuthor[p.author].answer)  byAuthor[p.author].answer = p;
+    });
+
+    const exportData = {
+        exportedAt:       new Date().toISOString(),
+        discussionUrl:    metadata?.url   || '',
+        discussionTitle:  metadata?.title || '',
+        totalStudents:    Object.keys(byAuthor).length,
+        totalPosts:       posts.length,
+        students: []
+    };
+
+    for (const [author, data] of Object.entries(byAuthor)) {
+        if (!data.answer) continue;
+        const text = data.answer.body;
+        const words = text.split(/\s+/).filter(w => w.length > 1).length;
+        const apaMatches = text.match(/\([A-Z][a-zA-Z\-]+(?:\s+et\s+al\.)?,\s+\d{4}\)/g) || [];
+
+        exportData.students.push({
+            name:  author,
+            answer: {
+                text,
+                wordCount:      words,
+                date:           data.answer.date    || '',
+                hasImages:      (data.answer.images || 0) > 0,
+                apaCitationsDetected: apaMatches,
+                hasReferenceList: /\b(references|bibliography)\b/i.test(text)
+            },
+            replies: data.replies.map(r => ({
+                text:      r.body,
+                repliedTo: r.repliedTo || [],
+                date:      r.date || ''
+            })),
+            peerRepliesCount: data.replies.length
+        });
+    }
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    chrome.downloads.download({ url, filename: `forum-posts-${stamp}.json`, saveAs: true });
 }
